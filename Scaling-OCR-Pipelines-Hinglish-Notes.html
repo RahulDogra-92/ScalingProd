@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scaling OCR Pipelines to TB-Scale — Hinglish Handwritten Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&family=Kalam:wght@300;400;700&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#1a2b4a;
+  --ink-soft:#33445f;
+  --red:#d63b3b;
+  --blue:#2a5db0;
+  --green:#1f8a4c;
+  --purple:#7b3fa0;
+  --orange:#e07b1a;
+  --paper:#fbf7ec;
+  --line:#cfe3f0;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  font-family:'Kalam',cursive;
+  color:var(--ink);
+  background:#e9eef3;
+  line-height:1.55;
+  font-size:18px;
+}
+.page{
+  max-width:920px;
+  margin:28px auto;
+  background:var(--paper);
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px);
+  background-size:100% 32px;
+  border:1px solid #d8cfb8;
+  border-radius:10px;
+  padding:46px 54px 60px 70px;
+  position:relative;
+  box-shadow:0 14px 40px rgba(0,0,0,.18);
+}
+/* red margin line like a notebook */
+.page::before{
+  content:"";
+  position:absolute;
+  top:0;bottom:0;left:46px;
+  width:2px;
+  background:#e7a0a0;
+  opacity:.7;
+}
+/* punch holes */
+.page::after{
+  content:"";
+  position:absolute;
+  left:16px;top:0;bottom:0;width:16px;
+  background-image:radial-gradient(circle, #d8d2c0 6px, transparent 7px);
+  background-size:16px 120px;
+  background-repeat:repeat-y;
+  opacity:.7;
+}
+h1,h2,h3{font-family:'Caveat',cursive;line-height:1.1;margin:0;}
+h1{
+  font-size:54px;
+  color:var(--ink);
+  text-align:center;
+  margin-bottom:4px;
+  text-shadow:1px 1px 0 #fff;
+}
+.subtitle{
+  text-align:center;
+  font-family:'Shadows Into Light',cursive;
+  font-size:22px;
+  color:var(--blue);
+  margin-bottom:6px;
+}
+.byline{
+  text-align:center;
+  font-family:'Patrick Hand',cursive;
+  color:var(--ink-soft);
+  font-size:16px;
+  margin-bottom:26px;
+}
+h2{
+  font-size:40px;
+  color:var(--blue);
+  margin:42px 0 6px;
+  display:flex;align-items:center;gap:10px;
+}
+h2 .num{
+  font-family:'Caveat',cursive;
+  background:var(--blue);
+  color:#fff;
+  width:46px;height:46px;
+  border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:30px;
+  box-shadow:2px 2px 0 rgba(0,0,0,.2);
+  flex:none;
+  transform:rotate(-6deg);
+}
+h3{
+  font-size:30px;
+  color:var(--purple);
+  margin:26px 0 4px;
+}
+p{margin:8px 0;}
+.lead{font-size:19px;}
+ul{margin:8px 0 8px 4px;padding-left:26px;}
+li{margin:4px 0;}
+b,strong{color:var(--red);font-weight:700;}
+em{color:var(--green);font-style:normal;font-weight:700;}
+.u{ text-decoration:underline; text-decoration-color:var(--orange); text-decoration-thickness:2px; }
+/* highlighter */
+.hl{
+  background:linear-gradient(120deg, rgba(255,235,120,.85), rgba(255,235,120,.85));
+  padding:0 4px;border-radius:3px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;
+}
+.hl-g{background:linear-gradient(120deg, rgba(150,240,170,.8), rgba(150,240,170,.8));padding:0 4px;border-radius:3px;}
+.hl-p{background:linear-gradient(120deg, rgba(220,180,255,.7), rgba(220,180,255,.7));padding:0 4px;border-radius:3px;}
+/* boxes */
+.note{
+  border:2.5px solid var(--ink);
+  border-radius:14px 8px 16px 6px;
+  padding:14px 18px;
+  margin:18px 0;
+  background:rgba(255,255,255,.5);
+  position:relative;
+  box-shadow:3px 3px 0 rgba(0,0,0,.08);
+}
+.note.warn{border-color:var(--red);background:rgba(255,225,225,.45);}
+.note.tip{border-color:var(--green);background:rgba(220,250,225,.5);}
+.note.key{border-color:var(--orange);background:rgba(255,240,215,.55);}
+.note .tag{
+  position:absolute;top:-15px;left:18px;
+  background:var(--paper);
+  font-family:'Caveat',cursive;font-size:24px;
+  padding:0 10px;
+}
+.note.warn .tag{color:var(--red);}
+.note.tip .tag{color:var(--green);}
+.note.key .tag{color:var(--orange);}
+.note .tag.b{color:var(--blue);}
+/* sticky note */
+.sticky{
+  background:#fff6a8;
+  padding:16px 18px;
+  font-family:'Patrick Hand',cursive;
+  box-shadow:3px 5px 12px rgba(0,0,0,.18);
+  transform:rotate(-1.5deg);
+  margin:20px auto;
+  max-width:560px;
+  border-radius:2px;
+}
+.sticky.pink{background:#ffd0e0;transform:rotate(1.5deg);}
+.sticky.blue{background:#bfe3ff;transform:rotate(-1deg);}
+/* code-ish */
+code, .mono{
+  font-family:'Courier New',monospace;
+  background:#eef2f7;
+  border:1px dashed #9fb4cf;
+  padding:1px 6px;border-radius:4px;
+  font-size:15px;color:#243a5e;
+}
+pre{
+  font-family:'Courier New',monospace;
+  background:#1e2a3d;color:#dbe7ff;
+  padding:14px 16px;border-radius:8px;
+  font-size:14px;line-height:1.5;
+  overflow-x:auto;
+  box-shadow:3px 3px 0 rgba(0,0,0,.2);
+}
+pre .c{color:#7fd1a0;}
+pre .k{color:#ffcf6b;}
+/* flow diagram */
+.flow{display:flex;flex-direction:column;align-items:center;gap:2px;margin:16px 0;}
+.flow .step{
+  font-family:'Patrick Hand',cursive;
+  border:2px solid var(--blue);
+  background:#fff;
+  border-radius:8px;
+  padding:8px 18px;
+  min-width:60%;
+  text-align:center;
+  box-shadow:2px 2px 0 rgba(42,93,176,.25);
+}
+.flow .arr{font-size:22px;color:var(--blue);line-height:1;}
+.flow.red .step{border-color:var(--red);box-shadow:2px 2px 0 rgba(214,59,59,.25);}
+.flow.red .arr{color:var(--red);}
+/* horizontal architecture */
+.archrow{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:10px 0;}
+.box{
+  border:2px solid var(--ink-soft);
+  background:#fff;
+  border-radius:10px;
+  padding:8px 12px;
+  font-family:'Patrick Hand',cursive;
+  text-align:center;
+  font-size:15px;
+  box-shadow:2px 2px 0 rgba(0,0,0,.1);
+}
+.box .t{font-weight:700;color:var(--blue);display:block;}
+/* compare table */
+table{border-collapse:collapse;width:100%;margin:16px 0;font-family:'Patrick Hand',cursive;font-size:16px;}
+th,td{border:2px solid var(--ink-soft);padding:8px 10px;text-align:left;vertical-align:top;}
+th{background:var(--ink);color:#fff;font-family:'Caveat',cursive;font-size:22px;}
+tr:nth-child(even) td{background:rgba(255,255,255,.4);}
+.before{color:var(--red);font-weight:700;}
+.after{color:var(--green);font-weight:700;}
+.win{color:var(--blue);font-weight:700;}
+.arrowlbl{
+  font-family:'Caveat',cursive;color:var(--orange);font-size:24px;
+  transform:rotate(-4deg);display:inline-block;
+}
+hr{border:none;border-top:2px dashed #c3b89a;margin:34px 0;}
+.toc{
+  font-family:'Patrick Hand',cursive;
+  background:rgba(255,255,255,.5);
+  border:2px dashed var(--blue);
+  border-radius:10px;padding:14px 22px;margin:18px 0;
+}
+.toc a{color:var(--ink);text-decoration:none;}
+.toc li{margin:2px 0;}
+.doodle{font-family:'Caveat',cursive;color:var(--orange);font-size:24px;transform:rotate(-3deg);display:inline-block;}
+.center{text-align:center;}
+.small{font-size:15px;color:var(--ink-soft);}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media(max-width:680px){.grid2{grid-template-columns:1fr;}.page{padding:30px 18px 40px 40px;}}
+@media print{
+  body{background:#fff;}
+  .page{box-shadow:none;margin:0;border:none;max-width:100%;}
+  h2{break-after:avoid;}
+  .note,.sticky,pre,table{break-inside:avoid;}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Scaling OCR Pipelines to TB-Scale</h1>
+<div class="subtitle">Bottlenecks, Worker Contention &amp; Distributed Systems Lessons</div>
+<div class="byline">Hinglish Handwritten Notes &nbsp;•&nbsp; based on Haris Ahmad's engineering blog</div>
+
+<div class="toc">
+<b style="color:var(--blue)">Index / Topics:</b>
+<ul>
+<li>1. Problem kya tha?</li>
+<li>2. Extraction System ki Architecture</li>
+<li>3. Parallelism ke 3 Levels</li>
+<li>4. Profiling — system ko samjhna</li>
+<li>5. Scaling Iterations &amp; Results</li>
+<li>6. The Single-Instance Contradiction</li>
+<li>7. Assumptions, Experiments &amp; Dead-Ends</li>
+<li>8. Hidden Bottlenecks (asli villain)</li>
+<li>9. Bottlenecks expensive kyun bane?</li>
+<li>10. Breakthrough Architecture (Fix)</li>
+<li>11. Final Results</li>
+<li>12. Cost &amp; Time Optimization</li>
+<li>13. Engineering Lessons (Top 10)</li>
+<li>14. Wrapping Up</li>
+</ul>
+</div>
+
+<hr>
+<h2><span class="num">1</span> Problem kya tha? <span class="doodle">(the real pain)</span></h2>
+<p class="lead">Aaj kal data extraction bohot common ho gaya hai — <span class="hl">OCR, LLMs aur Document-AI</span> systems PDFs, Word docs, scanned files aur images se information nikaalte hain.</p>
+<p>Lekin ek <em>working</em> extraction pipeline banana aur usko <b>TB-scale</b> tak efficiently scale karna — ye do bilkul alag cheezein hain.</p>
+
+<div class="note warn">
+<span class="tag">⚠️ Asli challenge</span>
+Jab data hundreds of GBs ya TBs me pahunchta hai, tab problem sirf "extraction quality" nahi rehti. Core engineering problems important ho jaati hain:
+<ul>
+<li>Parallelism</li>
+<li>Orchestration</li>
+<li>Memory utilization</li>
+<li>Worker scaling</li>
+<li>Infrastructure cost</li>
+<li>Throughput</li>
+<li>Distributed bottlenecks</li>
+</ul>
+</div>
+
+<p>Unke paas pehle se ek extraction pipeline thi (PDFs, DOCs, scanned docs, ZIPs, OCR-heavy files ke liye). Asli problem thi: <span class="hl-p">isko TB-scale ke liye efficiently scale karna.</span></p>
+<p>Jaise-jaise bade runs estimate kiye gaye, projected <b>runtime</b> aur <b>infra cost</b> itni high ho gayi ki existing architecture economically scale karna mushkil tha.</p>
+
+<div class="sticky blue">
+<b style="color:#15406b">🎯 Core Objective:</b><br>
+1) Infra cost <u>kam</u> karo &nbsp; 2) Extraction throughput <u>badhao</u> &nbsp; 3) Large-scale extraction ko operationally <u>feasible</u> banao.
+</div>
+
+<hr>
+<h2><span class="num">2</span> Extraction System ki Architecture</h2>
+<p>Pipeline bani thi bade enterprise document collections process karne ke liye — PDFs, scanned docs, DOC/DOCX, ZIP archives, images, aur OCR-heavy files.</p>
+
+<p class="center"><b style="color:var(--blue)">High-level flow:</b></p>
+<div class="flow">
+  <div class="step">Source Systems / SharePoint / OneDrive / Graph API</div>
+  <div class="arr">▼</div>
+  <div class="step">Distributed Extraction Instances (SageMaker, high-CPU)</div>
+  <div class="arr">▼</div>
+  <div class="step">Worker-Level Processing (multiprocessing)</div>
+  <div class="arr">▼</div>
+  <div class="step">OCR / Parsing / Extraction</div>
+  <div class="arr">▼</div>
+  <div class="step">Output Storage (S3) + Metadata Tracking (Postgres)</div>
+</div>
+
+<p>Pipeline distributed <span class="hl">SageMaker instances</span> par deploy thi, high-core CPU machines (e.g. ~192 vCPUs) use hoti thi. Har instance ek <em>shard</em> (dataset ka subset) independently process karta tha — isse <b>horizontal scaling</b> possible hua.</p>
+
+<div class="note">
+<span class="tag b">🧩 Inside each worker</span>
+File Download (Graph/SharePoint) → Document Processing (PDF parse, OCR if needed, ZIP handling, image processing, DOC/DOCX parse) → <b>Page-level OCR parallelism</b> (~5 pages per thread) → Post-processing &amp; Metadata.
+</div>
+
+<hr>
+<h2><span class="num">3</span> Parallelism ke 3 Levels <span class="doodle">(yahin se khel shuru)</span></h2>
+<p>Architecture ki sabse important baat — parallelism <span class="hl-p">ek saath multiple layers</span> par exist karta tha.</p>
+
+<h3>1&#65039;&#8419; Instance-Level Parallelism</h3>
+<p>Pura dataset shards me divide hota tha, multiple SageMaker instances par distribute. Ye sabse upar ka distributed execution level tha. Load badhta to instances add karte.</p>
+<pre>Dataset
+   ├── Instance 1
+   ├── Instance 2
+   ├── Instance 3
+   └── ...</pre>
+
+<h3>2&#65039;&#8419; Worker-Level Parallelism</h3>
+<p>Har instance ke andar <b>multiprocessing-based workers</b> files parallel process karte the (~30 workers/instance se shuru). Har worker khud handle karta: file download, parsing, OCR, extraction, metadata, output storage.</p>
+<div class="note tip">
+<span class="tag">💡 Kyun multiprocessing?</span>
+OCR workload <b>CPU-bound</b> hota hai. Isliye threading ke bajaye multiprocessing choose kiya — taaki CPU cores theek se use ho (GIL bypass ho).
+</div>
+
+<h3>3&#65039;&#8419; Parallelism Inside Each Worker</h3>
+<p>Worker ke andar bhi ek aur parallelism layer thi. Bade PDFs/scanned docs ke liye: pages independently process, OCR concurrently across pages (~5 OCR page threads), aur image preprocessing me extra threading.</p>
+
+<div class="note warn">
+<span class="tag">⚠️ Effective concurrency</span>
+Runtime model roughly ban gaya:
+<pre>Distributed Instances
+    × 150 Workers
+    × Multiple Files
+    × ~5 OCR Page Threads</pre>
+Matlab <b>actual runtime concurrency</b> configured worker count se kahin zyada thi!
+</div>
+<p><u class="u">Small scale</u> par: throughput bohot accha. <span class="hl">Bade scale</span> par: CPU oversubscription, thread contention, memory pressure, scheduling overhead, long-tail behaviour, aur orchestration bottlenecks.</p>
+
+<hr>
+<h2><span class="num">4</span> Profiling — System ko samajhna</h2>
+<p>Optimize karne se <b>pehle</b> ye samajhna zaroori tha ki system bade runs me compute resources kaise use kar raha hai.</p>
+
+<div class="sticky">
+<b>🤔 Core Question:</b> Kya instances available CPU + memory <u>efficiently</u> use kar rahe hain, ya hidden bottlenecks runtime aur cost ko inflate kar rahe hain?
+</div>
+
+<p>Profiling 3 levels par add hui: <span class="hl-g">instance level</span>, <span class="hl-g">worker level</span>, aur <span class="hl-g">file-processing level</span>. Kyunki deep cloud-native AWS observability limited thi, isliye zyadatar profiling <b>application layer</b> me Python instrumentation se ki gayi.</p>
+
+<div class="grid2">
+<div class="note">
+<span class="tag b">🛠️ Tools</span>
+<ul>
+<li><span class="mono">psutil</span></li>
+<li>Custom worker instrumentation</li>
+<li>Profiling tables</li>
+<li>Run/file-level tracing → <b>Postgres</b></li>
+</ul>
+</div>
+<div class="note">
+<span class="tag b">📏 Metrics tracked</span>
+<ul>
+<li>CPU utilization (start/mid/end)</li>
+<li>Memory usage + RSS memory (MB)</li>
+<li>Worker execution time</li>
+<li>Long-running files (long-tail)</li>
+<li>Shard-level &amp; retry/error behaviour</li>
+</ul>
+</div>
+</div>
+
+<p>Common <span class="mono">psutil</span> functions:</p>
+<pre><span class="k">psutil</span>.Process().memory_info().rss
+<span class="k">psutil</span>.Process().cpu_percent()
+<span class="k">psutil</span>.virtual_memory()
+<span class="k">psutil</span>.cpu_percent()</pre>
+
+<div class="note key">
+<span class="tag">💡 Early finding</span>
+CPU utilization <b>surprisingly LOW</b> tha — bavjood iske ki runtime aur infra usage high tha! Iska matlab compute idle pada tha, kuch aur block kar raha tha.
+</div>
+<p>Profiling se mila: underutilized CPU, long-tail files, uneven worker behaviour, nested concurrency effects, aur orchestration bottlenecks — jo sirf overall runtime dekh ke <em>visible nahi the</em>.</p>
+
+<hr>
+<h2><span class="num">5</span> Scaling Iterations &amp; Results</h2>
+<p>Profiling ke baad agla step seedha tha: <span class="hl">parallelism badhao, throughput improve karo.</span></p>
+
+<div class="flow red">
+  <div class="step">~30 workers/instance &nbsp;→&nbsp; CPU peak sirf ~20% &#128557;</div>
+  <div class="arr">▼ aggressive scale</div>
+  <div class="step">~150 workers/instance &nbsp;→&nbsp; CPU peak ~50% only</div>
+</div>
+
+<p>Pehle runtime noticeably improve hua. Lekin jaise workload badha, behaviour <b>inconsistent</b> ho gaya — kuch runs improve, kuch plateau, kuch <u class="u">slower</u>.</p>
+
+<div class="note warn">
+<span class="tag">⚠️ Expectation vs Reality</span>
+Expectation: <span class="mono">more instances + more workers = lower runtime</span><br>
+Reality: distributed runs <b>unpredictable</b> ho gaye. CPU abhi bhi sirf ~50% — toh bottleneck raw compute se <em>deeper</em> tha.
+</div>
+
+<div class="note tip">
+<span class="tag">💡 Ulta pattern: Worker Starvation</span>
+<b>Bade</b> workloads same instance par <u>chote</u> workloads se zyada efficiently complete ho rahe the! Load badhne par:
+<ul>
+<li>CPU utilization healthier</li>
+<li>Worker utilization better</li>
+<li>Throughput more stable</li>
+</ul>
+Matlab system <b>sustained load</b> me behtar behave karta tha, bursty/partial load me nahi. Kuch workers bohot der tak busy, kuch files ~1 ghanta tak le rahi thi!
+</div>
+<p class="center"><span class="arrowlbl">➜ Ye compute bottleneck jaisa lag hi nahi raha tha.</span></p>
+
+<hr>
+<h2><span class="num">6</span> The Single-Instance Contradiction <span class="doodle">(turning point!)</span></h2>
+<p>Sabse important experiment: <b>~40 GB workload</b> ko ek single high-CPU instance par chalaya.</p>
+
+<div class="sticky pink">
+&#9889; Pura workload sirf <b>~70 minutes</b> me complete!<br>
+Aur jo files distributed runs me "problem files" lag rahi thi — wo yahan <u>smoothly</u> bina delay complete ho gayi.
+</div>
+
+<p>Isne investigation ki direction hi badal di. Bottleneck OCR speed se nahi, balki <span class="hl-p">orchestration aur concurrency behaviour</span> se aa raha tha.</p>
+
+<div class="note key">
+<span class="tag">🔄 Investigation shift</span>
+Purana sawaal: <span style="text-decoration:line-through">"Parallelism kaise badhayein?"</span><br>
+Naya sawaal: <b>"Distributed scale par kaunse hidden bottlenecks ban rahe hain?"</b>
+</div>
+
+<hr>
+<h2><span class="num">7</span> Assumptions, Experiments &amp; Dead-Ends</h2>
+<p>Scaling inconsistent hone par journey bohot <b>experimental</b> ho gayi. Asli bottleneck samajhne se pehle kaafi assumptions test hui.</p>
+
+<h3>🔍 Hypothesis #1 — OCR hi Bottleneck hai?</h3>
+<p>Pehla shak: OCR khud slow kar raha hai. Multiple engines test kiye: <span class="mono">Tesseract/pytesseract</span>, PaddleOCR, Surya, EasyOCR, DocTR.</p>
+<ul>
+<li>Surprisingly <b>pytesseract</b> hi best perform kiya — khaaskar CPU-intensive extraction me.</li>
+<li>Aur jo files distributed runs me "stuck" lag rahi thi, wo isolated OCR tests me <em>minutes</em> me complete ho gayi.</li>
+</ul>
+<div class="note tip"><span class="tag">💡 Result</span> OCR primary bottleneck <u>nahi</u> tha. Par OCR threading / process contention / nested OCR parallelism abhi bhi suspect the.</div>
+
+<h3>⚙️ Hypothesis #2 — OCR Threading &amp; Nested Parallelism</h3>
+<p>OCR thread tuning (<span class="mono">OMP_THREAD_WORKER=1</span>), concurrency adjustments, nested OCR pressure kam karna.</p>
+<div class="note warn"><span class="tag">⚠️ Result</span> Little to <b>no</b> meaningful improvement. Runtime inconsistent raha, kuch runs to <u>regress</u> bhi hue.</div>
+
+<h3>🧵 Hypothesis #3 — Multiprocessing / Orchestration Blocking</h3>
+<p>Execution handling badli: <span class="mono">pool.map()</span> → <span class="mono">submit() + as_completed()</span> — taaki finer control, long-running tasks ka better handling, aur orchestration visibility mile.</p>
+<div class="note warn"><span class="tag">⚠️ Result</span> Throughput meaningfully improve nahi hua, kabhi-kabhi slight regression. Matlab <b>task scheduling alone</b> root bottleneck nahi tha.</div>
+
+<h3>🐍 Hypothesis #4 — Python Multiprocessing &amp; GIL Limits</h3>
+<p>Focus Python par shift: multiprocessing overhead, GIL behaviour, inter-process coordination, large-scale multiprocessing limits.</p>
+<div class="note"><span class="tag b">📌 Note</span> Python limitations contribute karte the, par <b>primary reason nahi</b>. Issue process-based parallelism ke saath bhi bana raha.</div>
+
+<h3>⚡ PySpark Experiments</h3>
+<p>Workload ab distributed data-processing problem jaisa lag raha tha, toh PySpark try kiya — sochke ki Spark ki orchestration scaling improve karegi.</p>
+<div class="note warn"><span class="tag">⚠️ Result</span> Results existing architecture jaise hi the. Expected breakthrough <u>nahi</u> aaya — isliye deeper PySpark migration pursue nahi kiya.</div>
+
+<div class="note">
+<span class="tag b">🚧 Aur experiments, aur contradictions</span>
+OCR tracing, nested concurrency reduce karna, blocking behaviour identify karna, long-tail isolate karna — <b>kisi ne bhi</b> consistently scaling degradation solve nahi ki.
+</div>
+
+<div class="sticky">
+<b>💡 Big realisation:</b> Bottleneck ek isolated component se nahi, balki <span style="background:#ffd0a0">multiple system layers ke beech ke <u>interactions</u></span> se aa raha tha.
+</div>
+
+<p class="center small">📋 Saari major assumptions extensively test hui — par koi bhi single change consistently problem solve nahi kar paaya. Problem <b>multi-layered</b> aur complex thi.</p>
+
+<table>
+<tr><th>#</th><th>Assumption</th><th>Observation</th><th>Outcome</th></tr>
+<tr><td>01</td><td>OCR engine hi culprit</td><td>pytesseract best; long files isolation me minutes me done</td><td class="after">OCR bottleneck NAHI</td></tr>
+<tr><td>02</td><td>OCR threading/config</td><td>No meaningful gain; kabhi regression</td><td class="before">Did not help</td></tr>
+<tr><td>03</td><td>Orchestration (ProcessPool)</td><td>Throughput same; slight regression</td><td class="before">Did not help</td></tr>
+<tr><td>04</td><td>Python GIL / MP overhead</td><td>Factor hai, par main reason nahi</td><td class="before">Not the root cause</td></tr>
+<tr><td>05</td><td>PySpark orchestration</td><td>Existing se almost same</td><td class="before">Did not help</td></tr>
+<tr><td>06</td><td>Hidden tracing / nested parallelism</td><td>Long-tail + degradation persist</td><td class="before">Multi-layered issue</td></tr>
+</table>
+
+<hr>
+<h2><span class="num">8</span> Hidden Bottlenecks <span class="doodle">(asli villain log!)</span></h2>
+<p>Sabse bada contradiction scaling behaviour se hi aaya: 30→150 workers ne throughput badhaya, single-instance ~40GB ~70 min me hua — <b>par wahi architecture distributed scale par degrade kar raha tha.</b></p>
+<p>Issue ab ye <u>nahi</u> tha: OCR throughput, CPU saturation, memory exhaustion, ya inefficient multiprocessing alone. Balki system me dikhe: <span class="hl">hidden contention, chained delays, distributed bottlenecks</span> — jo sirf scale par aate the.</p>
+
+<h3>🗄️ 1) DB Logging Contention</h3>
+<p>Active extraction workers ke andar database activity ek bada bottleneck thi. Workers continuously: logs likhte, progress rows update karte, Postgres ke saath interact karte — <em>execution ke during</em>.</p>
+<div class="note warn">
+<span class="tag">⚠️ Scale par</span>
+~150 workers × multiple instances par DB ops ne create kiya: contention, blocking, repeated connection overhead, execution delays. Postgres <b>critical execution path</b> ka hissa ban gaya — observability layer ke bajaye!
+</div>
+
+<h3>🔄 2) Repeated Client &amp; Session Setup</h3>
+<p>Actual extraction work ke bajaye workers baar-baar cost de rahe the: Graph client setup, S3 client creation, session initialization, aur per-file setup operations.</p>
+<div class="note warn"><span class="tag">⚠️</span> Individually chhota lagta hai. Par hazaaron files × hundreds of workers × distributed instances = <b>significant</b> waste.</div>
+
+<h3>🌐 3) Extra Graph / Metadata Calls</h3>
+<p>Pipeline me avoidable Graph-side overhead tha — kuch paths per-file extra metadata calls, validation calls, ya recovery requests karte the.</p>
+<div class="note warn"><span class="tag">⚠️</span> Ek extra call/file harmless lagta hai. Par large-scale par ye <b>hazaaron extra requests</b>, higher upstream pressure, aur contention ban gaye.</div>
+
+<h3>🚦 4) Graph Concurrency &amp; Retry Amplification</h3>
+<p class="lead">Sabse bada scale-out issue: <span class="hl-p">worker count directly Graph download concurrency me translate ho raha tha.</span></p>
+<p>Bahut instances × bahut workers = Graph/SharePoint par aggressive request bursts → <b>429 throttling</b>, retries, worker blocking, inflated wall-clock runtime.</p>
+<div class="note warn">
+<span class="tag">⚠️ Retry amplification</span>
+Throttled request turant fail nahi hoti — worker <b>busy</b> rehta hai wait + retry karte hue, jo ek aur upstream pressure wave create karta hai. &#128557;
+</div>
+<div class="sticky pink">
+&#128161; <b>Major realisation:</b><br>
+<span style="font-size:20px">Extraction parallelism aur download parallelism <u>identically scale nahi kar sakte!</u></span>
+</div>
+
+<hr>
+<h2><span class="num">9</span> Ye Bottlenecks Expensive kyun bane?</h2>
+<p>Asli problem: ye costs <b>nested aur compounding</b> thi. Ek worker me, ek single file involve karti thi:</p>
+<div class="flow">
+  <div class="step">Graph download → OCR → retries → DB logging → client setup → output handling</div>
+  <div class="arr">▼ repeat</div>
+  <div class="step">× ~150 workers</div>
+  <div class="arr">▼ repeat</div>
+  <div class="step">× multiple distributed instances</div>
+</div>
+
+<div class="note key">
+<span class="tag">🧮 Compounding effect</span>
+Koi <b>ek</b> catastrophic bottleneck nahi tha. Kai chhoti inefficiencies <u>ek saath interact</u> kar rahi thi:
+<ul>
+<li>Graph throttling</li>
+<li>Retry amplification</li>
+<li>DB contention</li>
+<li>Orchestration overhead</li>
+<li>Nested concurrency pressure</li>
+</ul>
+Isi liye ye pipeline diagnose karna itni mushkil thi.
+</div>
+
+<p class="center"><b style="color:var(--red);font-family:'Caveat';font-size:26px">Small cost/file × 150 workers × N instances × upstream pressure (429s) × blocked orchestration ＝ 🔥 RUNTIME EXPLODES (hours instead of minutes)</b></p>
+
+<hr>
+<h2><span class="num">10</span> Breakthrough Architecture (The Fix)</h2>
+<p>Hidden bottlenecks identify karne ke baad architecture ek core principle par redesign hua:</p>
+<div class="sticky blue center">
+<b style="font-size:22px;color:#15406b">Extraction ko highly parallel rakho, par uske around ki expensive operations ko CONTROL karo.</b>
+</div>
+
+<h3>🚦 Bounded Graph Concurrency</h3>
+<p>Problem: worker count badhane se Graph request fanout bhi unintentionally badh jaata tha → 429 throttling, retry amplification, blocked workers.</p>
+<p>Solution: <b>semaphore-based request control</b> se Graph download concurrency ko independently cap kiya — workers (~150) ko highly parallel rakhte hue.</p>
+<pre><span class="k">multiprocessing</span>.Manager().BoundedSemaphore()</pre>
+<div class="note tip">
+<span class="tag">💡 Idea</span>
+Har worker independently download trigger karne ke bajaye, Graph request pehle ek <b>semaphore slot acquire</b> karti hai, tabhi upstream service hit karti hai. Isse download concurrency worker-scale ke saath explode nahi hoti.
+</div>
+
+<p class="center"><b style="color:var(--green)">Optimized execution flow:</b></p>
+<div class="flow">
+  <div class="step">Bounded Graph Download Queue</div><div class="arr">▼</div>
+  <div class="step">Reusable Worker-local Clients</div><div class="arr">▼</div>
+  <div class="step">Persistent Session-based Downloads</div><div class="arr">▼</div>
+  <div class="step">OCR + Extraction</div><div class="arr">▼</div>
+  <div class="step">Reduced DB Logging</div><div class="arr">▼</div>
+  <div class="step">Output Upload + Completion</div>
+</div>
+
+<h3>🔄 Optimizing the Request Layer</h3>
+<p>Graph request layer ko distributed execution me resilient banaya:</p>
+<ul>
+<li>Reusable worker-local Graph/S3 clients</li>
+<li>Persistent <span class="mono">requests.Session()</span> usage</li>
+<li>Timeout-aware downloads</li>
+<li>Retry-aware execution</li>
+<li>Token refresh handling</li>
+<li>Jittered exponential backoff</li>
+</ul>
+<p>Har file par HTTP session recreate karne ke bajaye, workers <b>persistent session state</b> locally reuse karte the → kam connection setup, kam repeated auth, kam TCP/HTTP churn, kam latency.</p>
+
+<h3>⚠️ Retry Amplification &amp; Jitter Handling</h3>
+<p>Optimized retry layer handle karta tha: <b>429</b>, transient 5xx, request timeouts, token expiry. Logic respect karta tha: <span class="mono">Retry-After</span> headers, exponential windows, aur <b>randomized jitter</b>.</p>
+<div class="note key">
+<span class="tag">💡 Jitter kyun?</span>
+Bina jitter ke, throttling event ke baad pura distributed fleet <u>ek saath</u> retry karta hai → ek aur burst! Randomized jitter ne request behaviour ko across instances kaafi <b>stabilize</b> kiya.
+</div>
+
+<h3>🗄️ Reducing Worker Overhead</h3>
+<p>Active extraction workers ke andar expensive ops kam kiye. Optimized workers:</p>
+<ul>
+<li>Graph &amp; S3 clients locally reuse karte the</li>
+<li>Repeated setup work reduce</li>
+<li>Unnecessary metadata calls minimize</li>
+<li>Heavy DB logging ko active execution path se <b>hata diya</b></li>
+</ul>
+<div class="note tip">
+<span class="tag">✅ Faayda</span>
+Extraction ke during frequent Postgres updates ke bajaye DB interaction kaafi kam kiya → prevent: shared-row contention, DB session/run blocking, aur high-concurrency worker delays.
+</div>
+
+<hr>
+<h2><span class="num">11</span> Final Results <span class="doodle">🚀 BAM!</span></h2>
+<p>In architectural changes ke baad scaling behaviour <b>dramatically</b> badal gaya.</p>
+
+<table>
+<tr><th>Run / Scale</th><th>Before (earlier)</th><th>After (optimized)</th><th>Improvement</th></tr>
+<tr>
+  <td><b>40 GB</b><br><span class="small">(single instance)</span></td>
+  <td class="before">~3 hours<br><span class="small">unstable, long-tail</span></td>
+  <td class="after">~45 min<br><span class="small">stable &amp; consistent</span></td>
+  <td class="win">~93% faster</td>
+</tr>
+<tr>
+  <td><b>120 GB</b><br><span class="small">(15 instances)</span></td>
+  <td class="before">~5 hours</td>
+  <td class="after">~1 hour<br><span class="small">sirf 3 instances se!</span></td>
+  <td class="win">~80% faster</td>
+</tr>
+<tr>
+  <td><b>283–290 GB</b><br><span class="small">(15 instances)</span></td>
+  <td class="before">~15+ hours<br><span class="small">(estimated)</span></td>
+  <td class="after">~1 hour avg</td>
+  <td class="win">~90%+ faster</td>
+</tr>
+<tr>
+  <td><b>1 TB</b><br><span class="small">(projected, 25 inst)</span></td>
+  <td class="before">Several DAYS<br><span class="small">high bottlenecks</span></td>
+  <td class="after">~5–6 hours<br><span class="small">(projected)</span></td>
+  <td class="win">~88–90% faster</td>
+</tr>
+</table>
+
+<div class="grid2">
+<div class="note tip"><span class="tag">🏆 Success rate</span> Overall file success rate <b style="color:var(--green)">~99%</b> across all optimized runs.</div>
+<div class="note tip"><span class="tag">🛡️ Reliability</span> Highly stable &amp; reliable — <b style="color:var(--green)">predictable performance at scale.</b></div>
+</div>
+
+<hr>
+<h2><span class="num">12</span> Cost &amp; Time Optimization <span class="small">(283 GB run)</span></h2>
+
+<div class="grid2">
+<div class="note">
+<span class="tag b">⏱️ Time</span>
+<ul>
+<li>Earlier projection: <span class="before">~16.39 hours</span></li>
+<li>Optimized: <span class="after">~1.17 hours</span></li>
+<li><b>~15.22 hrs</b> wall-clock saved</li>
+<li><span class="win">~92.88% time optimization</span></li>
+</ul>
+<p class="small">Processes <b>2.83×</b> more data in &lt; quarter of earlier time.</p>
+</div>
+<div class="note">
+<span class="tag b">💰 Cost</span>
+<ul>
+<li>Earlier: <span class="before">~245.79 instance-hrs (~$2,481.88)</span></li>
+<li>Optimized: <span class="after">~17.50 instance-hrs (~$179.94)</span></li>
+<li><b>~228+</b> instance-hours saved</li>
+<li><span class="win">~92.75% cost optimization</span></li>
+</ul>
+<p class="small">💵 <b>~$2,300+</b> infra savings on a single large run!</p>
+</div>
+</div>
+
+<div class="center"><span class="arrowlbl" style="font-size:34px">Overall ~92% improvement (time + cost) 🎉</span></div>
+
+<div class="note key">
+<span class="tag">⚡ Projected at scale</span>
+~1 TB workload jo pehle <b>multi-day</b> + extremely high cost tha, ab projected: <b style="color:var(--green)">~5–6 hours</b> with <b>~90%+ cost savings</b>, ~25 distributed instances.
+</div>
+
+<div class="sticky">
+<b>🔑 Key Takeaway:</b> Optimized pipeline ne execution ko <span style="background:#ffd0a0">"experimentally scalable" → "operationally scalable"</span> bana diya. Asli win: API limits, retries, concurrency &amp; orchestration constraints ke andar reliably scale karna.
+</div>
+
+<hr>
+<h2><span class="num">13</span> Engineering Lessons — Top 10 <span class="doodle">(yaad rakhna!)</span></h2>
+
+<div class="note tip"><span class="tag">1️⃣</span> <b>More workers help — agar orchestration achhi ho.</b> Throughput tabhi improve hota hai jab workers efficiently coordinate hon, minimal overhead &amp; contention ke saath.</div>
+<div class="note tip"><span class="tag">2️⃣</span> <b>Distributed bottlenecks aksar sirf scale par dikhte hain.</b> Jo systems chote tests me theek lagte hain, wo data volume + concurrency badhne par badly degrade kar sakte hain.</div>
+<div class="note tip"><span class="tag">3️⃣</span> <b>Parallelism &amp; threading ko carefully balance karo.</b> Nested concurrency (workers × OCR threads) ko balance karna zaroori — warna contention, resource exhaustion, diminishing returns.</div>
+<div class="note tip"><span class="tag">4️⃣</span> <b>Upstream services bounded, shared resources hain.</b> Limits, quotas, capacity ko respect karo. Efficient usage + backoff strategies throttling/failures prevent karte hain.</div>
+<div class="note tip"><span class="tag">5️⃣</span> <b>Retry systems bina jitter ke "retry storms" banate hain.</b> Uncoordinated retries load amplify karke recovery delay karti hain. Use: jitter, exponential backoff, circuit breakers.</div>
+<div class="note tip"><span class="tag">6️⃣</span> <b>Small per-unit overhead scale par massive ban jaata hai.</b> Per operation milliseconds → hours/days of wasted compute, jab hazaaron baar repeat ho.</div>
+<div class="note tip"><span class="tag">7️⃣</span> <b>Machine saturation &amp; workload density throughput efficiency ko heavily affect karte hain.</b> Sustained execution > bursty distributed scaling (better utilization, kam orchestration overhead).</div>
+<div class="note tip"><span class="tag">8️⃣</span> <b>Profile EVERYTHING, sirf CPU nahi.</b> Usage, waits, latency, I/O, network, locks, garbage collection, external dependencies — end-to-end identify karo.</div>
+<div class="note tip"><span class="tag">9️⃣</span> <b>Unoptimized DB/IO exponential impact create karte hain.</b> Chatty, unindexed, ya frequent operations same shared resource par → bottlenecks, blocks, cascading delays.</div>
+<div class="note tip"><span class="tag">🔟</span> <b>Stable scaling ek system-wide discipline hai.</b> Orchestration, retries, concurrency, resource usage &amp; execution paths par coordinated control = predictable performance at any scale.</div>
+
+<div class="sticky pink center">
+<b style="font-size:20px">🧠 The Biggest Realisation:</b><br>
+Large-scale distributed pipelines aksar <u>raw compute</u> se nahi, balki <b>orchestration efficiency aur contention amplification</b> se limited hote hain.
+</div>
+
+<hr>
+<h2><span class="num">14</span> Wrapping Up</h2>
+<p>Ye genuinely ek difficult engineering problem thi. &#9888;&#65039;</p>
+<ul>
+<li>&#11088; Kai assumptions fail hui.</li>
+<li>&#11088; Kuch experiments ne performance <u>improve</u> ke bajaye <u>regress</u> ki.</li>
+<li>&#11088; Kuch bottlenecks tabhi dikhe jab earlier wale fix hue.</li>
+<li>&#11088; Aur bahut findings shuruaat me contradictory lagi.</li>
+</ul>
+<p>Par yahi cheez journey ko <b>valuable</b> banati hai. Runtime + cost improvements ke alawa, sabse valuable outcome tha: <span class="hl-p">large-scale distributed systems pressure me kaise behave karte hain — iski deeper understanding.</span></p>
+
+<div class="note key">
+<span class="tag">✅ Ye learnings kinke liye?</span>
+<ul>
+<li>OCR pipelines banane wale</li>
+<li>Distributed processing workloads</li>
+<li>Large-scale AI extraction platforms</li>
+</ul>
+Taaki same pitfalls avoid ho, aur scale ke baare me <b>sirf compute perspective</b> nahi, balki <b>systems perspective</b> se socha jaaye.
+</div>
+
+<div class="sticky blue center">
+<b style="font-size:22px;color:#15406b">"Scale ek compute problem nahi, ek systems-design discipline hai."</b>
+</div>
+
+<p class="center small" style="margin-top:30px">— End of Notes • Scaling OCR Pipelines to TB-Scale (Hinglish) —</p>
+
+
+
+
+
+
+
+
+</div>
+</body>
+</html>

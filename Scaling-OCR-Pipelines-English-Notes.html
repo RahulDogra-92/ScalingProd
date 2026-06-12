@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scaling OCR Pipelines to TB-Scale — Handwritten Notes (English)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&family=Kalam:wght@300;400;700&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#1a2b4a;
+  --ink-soft:#33445f;
+  --red:#d63b3b;
+  --blue:#2a5db0;
+  --green:#1f8a4c;
+  --purple:#7b3fa0;
+  --orange:#e07b1a;
+  --paper:#fbf7ec;
+  --line:#cfe3f0;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  font-family:'Kalam',cursive;
+  color:var(--ink);
+  background:#e9eef3;
+  line-height:1.55;
+  font-size:18px;
+}
+.page{
+  max-width:920px;
+  margin:28px auto;
+  background:var(--paper);
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px);
+  background-size:100% 32px;
+  border:1px solid #d8cfb8;
+  border-radius:10px;
+  padding:46px 54px 60px 70px;
+  position:relative;
+  box-shadow:0 14px 40px rgba(0,0,0,.18);
+}
+/* red margin line like a notebook */
+.page::before{
+  content:"";
+  position:absolute;
+  top:0;bottom:0;left:46px;
+  width:2px;
+  background:#e7a0a0;
+  opacity:.7;
+}
+/* punch holes */
+.page::after{
+  content:"";
+  position:absolute;
+  left:16px;top:0;bottom:0;width:16px;
+  background-image:radial-gradient(circle, #d8d2c0 6px, transparent 7px);
+  background-size:16px 120px;
+  background-repeat:repeat-y;
+  opacity:.7;
+}
+h1,h2,h3{font-family:'Caveat',cursive;line-height:1.1;margin:0;}
+h1{
+  font-size:54px;
+  color:var(--ink);
+  text-align:center;
+  margin-bottom:4px;
+  text-shadow:1px 1px 0 #fff;
+}
+.subtitle{
+  text-align:center;
+  font-family:'Shadows Into Light',cursive;
+  font-size:22px;
+  color:var(--blue);
+  margin-bottom:6px;
+}
+.byline{
+  text-align:center;
+  font-family:'Patrick Hand',cursive;
+  color:var(--ink-soft);
+  font-size:16px;
+  margin-bottom:26px;
+}
+h2{
+  font-size:40px;
+  color:var(--blue);
+  margin:42px 0 6px;
+  display:flex;align-items:center;gap:10px;
+}
+h2 .num{
+  font-family:'Caveat',cursive;
+  background:var(--blue);
+  color:#fff;
+  width:46px;height:46px;
+  border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:30px;
+  box-shadow:2px 2px 0 rgba(0,0,0,.2);
+  flex:none;
+  transform:rotate(-6deg);
+}
+h3{
+  font-size:30px;
+  color:var(--purple);
+  margin:26px 0 4px;
+}
+p{margin:8px 0;}
+.lead{font-size:19px;}
+ul{margin:8px 0 8px 4px;padding-left:26px;}
+li{margin:4px 0;}
+b,strong{color:var(--red);font-weight:700;}
+em{color:var(--green);font-style:normal;font-weight:700;}
+.u{ text-decoration:underline; text-decoration-color:var(--orange); text-decoration-thickness:2px; }
+/* highlighter */
+.hl{
+  background:linear-gradient(120deg, rgba(255,235,120,.85), rgba(255,235,120,.85));
+  padding:0 4px;border-radius:3px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;
+}
+.hl-g{background:linear-gradient(120deg, rgba(150,240,170,.8), rgba(150,240,170,.8));padding:0 4px;border-radius:3px;}
+.hl-p{background:linear-gradient(120deg, rgba(220,180,255,.7), rgba(220,180,255,.7));padding:0 4px;border-radius:3px;}
+/* boxes */
+.note{
+  border:2.5px solid var(--ink);
+  border-radius:14px 8px 16px 6px;
+  padding:14px 18px;
+  margin:18px 0;
+  background:rgba(255,255,255,.5);
+  position:relative;
+  box-shadow:3px 3px 0 rgba(0,0,0,.08);
+}
+.note.warn{border-color:var(--red);background:rgba(255,225,225,.45);}
+.note.tip{border-color:var(--green);background:rgba(220,250,225,.5);}
+.note.key{border-color:var(--orange);background:rgba(255,240,215,.55);}
+.note .tag{
+  position:absolute;top:-15px;left:18px;
+  background:var(--paper);
+  font-family:'Caveat',cursive;font-size:24px;
+  padding:0 10px;
+}
+.note.warn .tag{color:var(--red);}
+.note.tip .tag{color:var(--green);}
+.note.key .tag{color:var(--orange);}
+.note .tag.b{color:var(--blue);}
+/* sticky note */
+.sticky{
+  background:#fff6a8;
+  padding:16px 18px;
+  font-family:'Patrick Hand',cursive;
+  box-shadow:3px 5px 12px rgba(0,0,0,.18);
+  transform:rotate(-1.5deg);
+  margin:20px auto;
+  max-width:560px;
+  border-radius:2px;
+}
+.sticky.pink{background:#ffd0e0;transform:rotate(1.5deg);}
+.sticky.blue{background:#bfe3ff;transform:rotate(-1deg);}
+/* code-ish */
+code, .mono{
+  font-family:'Courier New',monospace;
+  background:#eef2f7;
+  border:1px dashed #9fb4cf;
+  padding:1px 6px;border-radius:4px;
+  font-size:15px;color:#243a5e;
+}
+pre{
+  font-family:'Courier New',monospace;
+  background:#1e2a3d;color:#dbe7ff;
+  padding:14px 16px;border-radius:8px;
+  font-size:14px;line-height:1.5;
+  overflow-x:auto;
+  box-shadow:3px 3px 0 rgba(0,0,0,.2);
+}
+pre .c{color:#7fd1a0;}
+pre .k{color:#ffcf6b;}
+/* flow diagram */
+.flow{display:flex;flex-direction:column;align-items:center;gap:2px;margin:16px 0;}
+.flow .step{
+  font-family:'Patrick Hand',cursive;
+  border:2px solid var(--blue);
+  background:#fff;
+  border-radius:8px;
+  padding:8px 18px;
+  min-width:60%;
+  text-align:center;
+  box-shadow:2px 2px 0 rgba(42,93,176,.25);
+}
+.flow .arr{font-size:22px;color:var(--blue);line-height:1;}
+.flow.red .step{border-color:var(--red);box-shadow:2px 2px 0 rgba(214,59,59,.25);}
+.flow.red .arr{color:var(--red);}
+/* horizontal architecture */
+.archrow{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:10px 0;}
+.box{
+  border:2px solid var(--ink-soft);
+  background:#fff;
+  border-radius:10px;
+  padding:8px 12px;
+  font-family:'Patrick Hand',cursive;
+  text-align:center;
+  font-size:15px;
+  box-shadow:2px 2px 0 rgba(0,0,0,.1);
+}
+.box .t{font-weight:700;color:var(--blue);display:block;}
+/* compare table */
+table{border-collapse:collapse;width:100%;margin:16px 0;font-family:'Patrick Hand',cursive;font-size:16px;}
+th,td{border:2px solid var(--ink-soft);padding:8px 10px;text-align:left;vertical-align:top;}
+th{background:var(--ink);color:#fff;font-family:'Caveat',cursive;font-size:22px;}
+tr:nth-child(even) td{background:rgba(255,255,255,.4);}
+.before{color:var(--red);font-weight:700;}
+.after{color:var(--green);font-weight:700;}
+.win{color:var(--blue);font-weight:700;}
+.arrowlbl{
+  font-family:'Caveat',cursive;color:var(--orange);font-size:24px;
+  transform:rotate(-4deg);display:inline-block;
+}
+hr{border:none;border-top:2px dashed #c3b89a;margin:34px 0;}
+.toc{
+  font-family:'Patrick Hand',cursive;
+  background:rgba(255,255,255,.5);
+  border:2px dashed var(--blue);
+  border-radius:10px;padding:14px 22px;margin:18px 0;
+}
+.toc a{color:var(--ink);text-decoration:none;}
+.toc li{margin:2px 0;}
+.doodle{font-family:'Caveat',cursive;color:var(--orange);font-size:24px;transform:rotate(-3deg);display:inline-block;}
+.center{text-align:center;}
+.small{font-size:15px;color:var(--ink-soft);}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media(max-width:680px){.grid2{grid-template-columns:1fr;}.page{padding:30px 18px 40px 40px;}}
+@media print{
+  body{background:#fff;}
+  .page{box-shadow:none;margin:0;border:none;max-width:100%;}
+  h2{break-after:avoid;}
+  .note,.sticky,pre,table{break-inside:avoid;}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>Scaling OCR Pipelines to TB-Scale</h1>
+<div class="subtitle">Bottlenecks, Worker Contention &amp; Distributed Systems Lessons</div>
+<div class="byline">Handwritten Notes &nbsp;•&nbsp; based on Haris Ahmad's engineering blog</div>
+
+<div class="toc">
+<b style="color:var(--blue)">Index / Topics:</b>
+<ul>
+<li>1. What was the problem?</li>
+<li>2. Architecture of the Extraction System</li>
+<li>3. The 3 Levels of Parallelism</li>
+<li>4. Profiling — understanding the system</li>
+<li>5. Scaling Iterations &amp; Results</li>
+<li>6. The Single-Instance Contradiction</li>
+<li>7. Assumptions, Experiments &amp; Dead-Ends</li>
+<li>8. Hidden Bottlenecks (the real villains)</li>
+<li>9. Why did the bottlenecks become expensive?</li>
+<li>10. Breakthrough Architecture (the Fix)</li>
+<li>11. Final Results</li>
+<li>12. Cost &amp; Time Optimization</li>
+<li>13. Engineering Lessons (Top 10)</li>
+<li>14. Wrapping Up</li>
+</ul>
+</div>
+
+<hr>
+<h2><span class="num">1</span> What was the problem? <span class="doodle">(the real pain)</span></h2>
+<p class="lead">These days data extraction is very common — <span class="hl">OCR, LLMs and Document-AI</span> systems extract information from PDFs, Word docs, scanned files and images.</p>
+<p>But building a <em>working</em> extraction pipeline and scaling it efficiently to <b>TB-scale</b> are two completely different things.</p>
+
+<div class="note warn">
+<span class="tag">⚠️ The real challenge</span>
+When data reaches hundreds of GBs or TBs, the problem is no longer just "extraction quality". Core engineering problems become critical:
+<ul>
+<li>Parallelism</li>
+<li>Orchestration</li>
+<li>Memory utilization</li>
+<li>Worker scaling</li>
+<li>Infrastructure cost</li>
+<li>Throughput</li>
+<li>Distributed bottlenecks</li>
+</ul>
+</div>
+
+<p>They already had an extraction pipeline (for PDFs, DOCs, scanned docs, ZIPs, OCR-heavy files). The real problem was: <span class="hl-p">scaling it efficiently for TB-scale.</span></p>
+<p>As larger runs were estimated, the projected <b>runtime</b> and <b>infra cost</b> became so high that the existing architecture was economically hard to scale.</p>
+
+<div class="sticky blue">
+<b style="color:#15406b">🎯 Core Objective:</b><br>
+1) <u>Reduce</u> infra cost &nbsp; 2) <u>Improve</u> extraction throughput &nbsp; 3) Make large-scale extraction operationally <u>feasible</u>.
+</div>
+
+<hr>
+<h2><span class="num">2</span> Architecture of the Extraction System</h2>
+<p>The pipeline was built to process large enterprise document collections — PDFs, scanned docs, DOC/DOCX, ZIP archives, images, and OCR-heavy files.</p>
+
+<p class="center"><b style="color:var(--blue)">High-level flow:</b></p>
+<div class="flow">
+  <div class="step">Source Systems / SharePoint / OneDrive / Graph API</div>
+  <div class="arr">▼</div>
+  <div class="step">Distributed Extraction Instances (SageMaker, high-CPU)</div>
+  <div class="arr">▼</div>
+  <div class="step">Worker-Level Processing (multiprocessing)</div>
+  <div class="arr">▼</div>
+  <div class="step">OCR / Parsing / Extraction</div>
+  <div class="arr">▼</div>
+  <div class="step">Output Storage (S3) + Metadata Tracking (Postgres)</div>
+</div>
+
+<p>The pipeline was deployed on distributed <span class="hl">SageMaker instances</span> using high-core CPU machines (e.g. ~192 vCPUs). Each instance processed a <em>shard</em> (subset of the dataset) independently — enabling <b>horizontal scaling</b>.</p>
+
+<div class="note">
+<span class="tag b">🧩 Inside each worker</span>
+File Download (Graph/SharePoint) → Document Processing (PDF parse, OCR if needed, ZIP handling, image processing, DOC/DOCX parse) → <b>Page-level OCR parallelism</b> (~5 pages per thread) → Post-processing &amp; Metadata.
+</div>
+
+<hr>
+<h2><span class="num">3</span> The 3 Levels of Parallelism <span class="doodle">(where the game begins)</span></h2>
+<p>The most important aspect of the architecture — parallelism existed <span class="hl-p">across multiple layers simultaneously</span>.</p>
+
+<h3>1&#65039;&#8419; Instance-Level Parallelism</h3>
+<p>The whole dataset was divided into shards and distributed across multiple SageMaker instances. This was the highest level of distributed execution. As load grew, more instances were added.</p>
+<pre>Dataset
+   ├── Instance 1
+   ├── Instance 2
+   ├── Instance 3
+   └── ...</pre>
+
+<h3>2&#65039;&#8419; Worker-Level Parallelism</h3>
+<p>Inside each instance, <b>multiprocessing-based workers</b> processed files in parallel (starting at ~30 workers/instance). Each worker handled: file download, parsing, OCR, extraction, metadata, output storage.</p>
+<div class="note tip">
+<span class="tag">💡 Why multiprocessing?</span>
+OCR workloads are <b>CPU-bound</b>. So multiprocessing was preferred over threading — to properly utilize CPU cores (bypassing the GIL).
+</div>
+
+<h3>3&#65039;&#8419; Parallelism Inside Each Worker</h3>
+<p>The worker itself had yet another parallelism layer. For large PDFs/scanned docs: pages processed independently, OCR run concurrently across pages (~5 OCR page threads), and image preprocessing added extra threading.</p>
+
+<div class="note warn">
+<span class="tag">⚠️ Effective concurrency</span>
+The runtime model roughly became:
+<pre>Distributed Instances
+    × 150 Workers
+    × Multiple Files
+    × ~5 OCR Page Threads</pre>
+Meaning the <b>actual runtime concurrency</b> was far larger than the configured worker count!
+</div>
+<p>At <u class="u">small scale</u>: throughput was great. At <span class="hl">large scale</span>: CPU oversubscription, thread contention, memory pressure, scheduling overhead, long-tail behaviour, and orchestration bottlenecks.</p>
+
+<hr>
+<h2><span class="num">4</span> Profiling — Understanding the System</h2>
+<p><b>Before</b> optimizing, it was essential to understand how the system actually used compute resources during large runs.</p>
+
+<div class="sticky">
+<b>🤔 Core Question:</b> Are the instances using available CPU + memory <u>efficiently</u>, or are hidden bottlenecks inflating runtime and cost?
+</div>
+
+<p>Profiling was added at 3 levels: <span class="hl-g">instance level</span>, <span class="hl-g">worker level</span>, and <span class="hl-g">file-processing level</span>. Since deep cloud-native AWS observability was limited, most profiling was done in the <b>application layer</b> via Python instrumentation.</p>
+
+<div class="grid2">
+<div class="note">
+<span class="tag b">🛠️ Tools</span>
+<ul>
+<li><span class="mono">psutil</span></li>
+<li>Custom worker instrumentation</li>
+<li>Profiling tables</li>
+<li>Run/file-level tracing → <b>Postgres</b></li>
+</ul>
+</div>
+<div class="note">
+<span class="tag b">📏 Metrics tracked</span>
+<ul>
+<li>CPU utilization (start/mid/end)</li>
+<li>Memory usage + RSS memory (MB)</li>
+<li>Worker execution time</li>
+<li>Long-running files (long-tail)</li>
+<li>Shard-level &amp; retry/error behaviour</li>
+</ul>
+</div>
+</div>
+
+<p>Common <span class="mono">psutil</span> functions:</p>
+<pre><span class="k">psutil</span>.Process().memory_info().rss
+<span class="k">psutil</span>.Process().cpu_percent()
+<span class="k">psutil</span>.virtual_memory()
+<span class="k">psutil</span>.cpu_percent()</pre>
+
+<div class="note key">
+<span class="tag">💡 Early finding</span>
+CPU utilization was <b>surprisingly LOW</b> — despite high runtime and infra usage! This meant compute was sitting idle while something else was blocking.
+</div>
+<p>Profiling revealed: underutilized CPU, long-tail files, uneven worker behaviour, nested concurrency effects, and orchestration bottlenecks — none of which were <em>visible</em> from overall runtime alone.</p>
+
+<hr>
+<h2><span class="num">5</span> Scaling Iterations &amp; Results</h2>
+<p>After profiling, the next step was straightforward: <span class="hl">increase parallelism, improve throughput.</span></p>
+
+<div class="flow red">
+  <div class="step">~30 workers/instance &nbsp;→&nbsp; CPU peak only ~20% &#128557;</div>
+  <div class="arr">▼ aggressive scale</div>
+  <div class="step">~150 workers/instance &nbsp;→&nbsp; CPU peak ~50% only</div>
+</div>
+
+<p>At first runtime improved noticeably. But as workloads grew, behaviour became <b>inconsistent</b> — some runs improved, some plateaued, some got <u class="u">slower</u>.</p>
+
+<div class="note warn">
+<span class="tag">⚠️ Expectation vs Reality</span>
+Expectation: <span class="mono">more instances + more workers = lower runtime</span><br>
+Reality: distributed runs became <b>unpredictable</b>. CPU still only ~50% — so the bottleneck was <em>deeper</em> than raw compute.
+</div>
+
+<div class="note tip">
+<span class="tag">💡 Inverse pattern: Worker Starvation</span>
+<b>Larger</b> workloads on the same instance were completing more efficiently than <u>smaller</u> ones! As load increased:
+<ul>
+<li>CPU utilization got healthier</li>
+<li>Worker utilization improved</li>
+<li>Throughput became more stable</li>
+</ul>
+Meaning the system behaved better under <b>sustained load</b> than bursty/partial load. Some workers stayed busy for very long, a few files took ~1 hour!
+</div>
+<p class="center"><span class="arrowlbl">➜ This no longer looked like a compute bottleneck.</span></p>
+
+<hr>
+<h2><span class="num">6</span> The Single-Instance Contradiction <span class="doodle">(turning point!)</span></h2>
+<p>The most important experiment: running a <b>~40 GB workload</b> on a single high-CPU instance.</p>
+
+<div class="sticky pink">
+&#9889; The entire workload completed in just <b>~70 minutes</b>!<br>
+And files that looked like "problem files" in distributed runs completed <u>smoothly</u> here, without delays.
+</div>
+
+<p>This changed the investigation's direction entirely. The bottleneck was coming from <span class="hl-p">orchestration and concurrency behaviour</span>, not OCR speed.</p>
+
+<div class="note key">
+<span class="tag">🔄 Investigation shift</span>
+Old question: <span style="text-decoration:line-through">"How do we increase parallelism?"</span><br>
+New question: <b>"What hidden bottlenecks appear under distributed scale?"</b>
+</div>
+
+<hr>
+<h2><span class="num">7</span> Assumptions, Experiments &amp; Dead-Ends</h2>
+<p>As scaling became inconsistent, the journey turned highly <b>experimental</b>. Many assumptions were tested before the real bottleneck became clear.</p>
+
+<h3>🔍 Hypothesis #1 — Is OCR the Bottleneck?</h3>
+<p>First suspicion: OCR itself was slowing things down. Multiple engines tested: <span class="mono">Tesseract/pytesseract</span>, PaddleOCR, Surya, EasyOCR, DocTR.</p>
+<ul>
+<li>Surprisingly, <b>pytesseract</b> performed best — especially for CPU-intensive extraction.</li>
+<li>And files that looked "stuck" in distributed runs completed in <em>minutes</em> in isolated OCR tests.</li>
+</ul>
+<div class="note tip"><span class="tag">💡 Result</span> OCR was <u>not</u> the primary bottleneck. But OCR threading / process contention / nested OCR parallelism were still suspects.</div>
+
+<h3>⚙️ Hypothesis #2 — OCR Threading &amp; Nested Parallelism</h3>
+<p>OCR thread tuning (<span class="mono">OMP_THREAD_WORKER=1</span>), concurrency adjustments, reducing nested OCR pressure.</p>
+<div class="note warn"><span class="tag">⚠️ Result</span> Little to <b>no</b> meaningful improvement. Runtime stayed inconsistent, some runs even <u>regressed</u>.</div>
+
+<h3>🧵 Hypothesis #3 — Multiprocessing / Orchestration Blocking</h3>
+<p>Changed execution handling: <span class="mono">pool.map()</span> → <span class="mono">submit() + as_completed()</span> — for finer control, better handling of long-running tasks, and orchestration visibility.</p>
+<div class="note warn"><span class="tag">⚠️ Result</span> Throughput didn't meaningfully improve, sometimes slight regression. So <b>task scheduling alone</b> wasn't the root bottleneck.</div>
+
+<h3>🐍 Hypothesis #4 — Python Multiprocessing &amp; GIL Limits</h3>
+<p>Focus shifted to Python: multiprocessing overhead, GIL behaviour, inter-process coordination, large-scale multiprocessing limits.</p>
+<div class="note"><span class="tag b">📌 Note</span> Python limitations contributed, but were <b>not the primary reason</b>. The issue persisted even with process-based parallelism.</div>
+
+<h3>⚡ PySpark Experiments</h3>
+<p>The workload now resembled a distributed data-processing problem, so PySpark was tried — assuming Spark's orchestration would improve scaling.</p>
+<div class="note warn"><span class="tag">⚠️ Result</span> Results were almost identical to the existing architecture. The expected breakthrough <u>never</u> came — so deeper PySpark migration was not pursued.</div>
+
+<div class="note">
+<span class="tag b">🚧 More experiments, more contradictions</span>
+OCR tracing, reducing nested concurrency, identifying blocking behaviour, isolating long-tail — <b>none</b> consistently solved the scaling degradation.
+</div>
+
+<div class="sticky">
+<b>💡 Big realisation:</b> The bottleneck came not from an isolated component, but from the <span style="background:#ffd0a0"><u>interactions</u> between multiple system layers</span>.
+</div>
+
+<p class="center small">📋 All major assumptions were tested extensively — but no single change consistently solved the problem. The problem was <b>multi-layered</b> and complex.</p>
+
+<table>
+<tr><th>#</th><th>Assumption</th><th>Observation</th><th>Outcome</th></tr>
+<tr><td>01</td><td>OCR engine is the culprit</td><td>pytesseract best; long files done in minutes in isolation</td><td class="after">OCR is NOT the bottleneck</td></tr>
+<tr><td>02</td><td>OCR threading/config</td><td>No meaningful gain; sometimes regression</td><td class="before">Did not help</td></tr>
+<tr><td>03</td><td>Orchestration (ProcessPool)</td><td>Throughput same; slight regression</td><td class="before">Did not help</td></tr>
+<tr><td>04</td><td>Python GIL / MP overhead</td><td>A factor, but not the main reason</td><td class="before">Not the root cause</td></tr>
+<tr><td>05</td><td>PySpark orchestration</td><td>Almost same as existing</td><td class="before">Did not help</td></tr>
+<tr><td>06</td><td>Hidden tracing / nested parallelism</td><td>Long-tail + degradation persist</td><td class="before">Multi-layered issue</td></tr>
+</table>
+
+<hr>
+<h2><span class="num">8</span> Hidden Bottlenecks <span class="doodle">(the real villains!)</span></h2>
+<p>The biggest contradiction came from scaling behaviour itself: 30→150 workers boosted throughput, single-instance ~40GB finished in ~70 min — <b>yet the same architecture degraded at distributed scale.</b></p>
+<p>The issue was no longer: OCR throughput, CPU saturation, memory exhaustion, or inefficient multiprocessing alone. Instead the system showed: <span class="hl">hidden contention, chained delays, distributed bottlenecks</span> — that only appeared at scale.</p>
+
+<h3>🗄️ 1) DB Logging Contention</h3>
+<p>Database activity inside active extraction workers was a major bottleneck. Workers were continuously: writing logs, updating progress rows, interacting with Postgres — <em>during execution</em>.</p>
+<div class="note warn">
+<span class="tag">⚠️ At scale</span>
+Across ~150 workers × multiple instances, DB ops created: contention, blocking, repeated connection overhead, execution delays. Postgres became part of the <b>critical execution path</b> — instead of just an observability layer!
+</div>
+
+<h3>🔄 2) Repeated Client &amp; Session Setup</h3>
+<p>Instead of doing actual extraction work, workers repeatedly paid for: Graph client setup, S3 client creation, session initialization, and per-file setup operations.</p>
+<div class="note warn"><span class="tag">⚠️</span> Individually small. But thousands of files × hundreds of workers × distributed instances = <b>significant</b> waste.</div>
+
+<h3>🌐 3) Extra Graph / Metadata Calls</h3>
+<p>The pipeline had avoidable Graph-side overhead — some paths made per-file extra metadata calls, validation calls, or recovery requests.</p>
+<div class="note warn"><span class="tag">⚠️</span> One extra call/file sounds harmless. But at large scale these became <b>thousands of extra requests</b>, higher upstream pressure, and contention.</div>
+
+<h3>🚦 4) Graph Concurrency &amp; Retry Amplification</h3>
+<p class="lead">The biggest scale-out issue: <span class="hl-p">worker count translated directly into Graph download concurrency.</span></p>
+<p>Many instances × many workers = aggressive request bursts to Graph/SharePoint → <b>429 throttling</b>, retries, worker blocking, inflated wall-clock runtime.</p>
+<div class="note warn">
+<span class="tag">⚠️ Retry amplification</span>
+A throttled request doesn't fail immediately — the worker stays <b>busy</b> waiting + retrying, creating another wave of upstream pressure. &#128557;
+</div>
+<div class="sticky pink">
+&#128161; <b>Major realisation:</b><br>
+<span style="font-size:20px">Extraction parallelism and download parallelism <u>cannot scale identically!</u></span>
+</div>
+
+<hr>
+<h2><span class="num">9</span> Why did the Bottlenecks become Expensive?</h2>
+<p>The real problem: these costs were <b>nested and compounding</b>. Inside one worker, a single file involved:</p>
+<div class="flow">
+  <div class="step">Graph download → OCR → retries → DB logging → client setup → output handling</div>
+  <div class="arr">▼ repeat</div>
+  <div class="step">× ~150 workers</div>
+  <div class="arr">▼ repeat</div>
+  <div class="step">× multiple distributed instances</div>
+</div>
+
+<div class="note key">
+<span class="tag">🧮 Compounding effect</span>
+There was no <b>single</b> catastrophic bottleneck. Several small inefficiencies were <u>interacting together</u>:
+<ul>
+<li>Graph throttling</li>
+<li>Retry amplification</li>
+<li>DB contention</li>
+<li>Orchestration overhead</li>
+<li>Nested concurrency pressure</li>
+</ul>
+That's what made the pipeline so hard to diagnose.
+</div>
+
+<p class="center"><b style="color:var(--red);font-family:'Caveat';font-size:26px">Small cost/file × 150 workers × N instances × upstream pressure (429s) × blocked orchestration ＝ 🔥 RUNTIME EXPLODES (hours instead of minutes)</b></p>
+
+<hr>
+<h2><span class="num">10</span> Breakthrough Architecture (The Fix)</h2>
+<p>After identifying the hidden bottlenecks, the architecture was redesigned around one core principle:</p>
+<div class="sticky blue center">
+<b style="font-size:22px;color:#15406b">Keep extraction highly parallel, but CONTROL the expensive operations around it.</b>
+</div>
+
+<h3>🚦 Bounded Graph Concurrency</h3>
+<p>Problem: increasing worker count unintentionally increased Graph request fanout too → 429 throttling, retry amplification, blocked workers.</p>
+<p>Solution: <b>semaphore-based request control</b> to independently cap Graph download concurrency — while keeping workers (~150) highly parallel.</p>
+<pre><span class="k">multiprocessing</span>.Manager().BoundedSemaphore()</pre>
+<div class="note tip">
+<span class="tag">💡 Idea</span>
+Instead of every worker independently triggering downloads, a Graph request first <b>acquires a semaphore slot</b>, then hits the upstream service. So download concurrency doesn't explode with worker scale.
+</div>
+
+<p class="center"><b style="color:var(--green)">Optimized execution flow:</b></p>
+<div class="flow">
+  <div class="step">Bounded Graph Download Queue</div><div class="arr">▼</div>
+  <div class="step">Reusable Worker-local Clients</div><div class="arr">▼</div>
+  <div class="step">Persistent Session-based Downloads</div><div class="arr">▼</div>
+  <div class="step">OCR + Extraction</div><div class="arr">▼</div>
+  <div class="step">Reduced DB Logging</div><div class="arr">▼</div>
+  <div class="step">Output Upload + Completion</div>
+</div>
+
+<h3>🔄 Optimizing the Request Layer</h3>
+<p>The Graph request layer was made resilient for distributed execution:</p>
+<ul>
+<li>Reusable worker-local Graph/S3 clients</li>
+<li>Persistent <span class="mono">requests.Session()</span> usage</li>
+<li>Timeout-aware downloads</li>
+<li>Retry-aware execution</li>
+<li>Token refresh handling</li>
+<li>Jittered exponential backoff</li>
+</ul>
+<p>Instead of recreating an HTTP session per file, workers reused <b>persistent session state</b> locally → less connection setup, less repeated auth, less TCP/HTTP churn, less latency.</p>
+
+<h3>⚠️ Retry Amplification &amp; Jitter Handling</h3>
+<p>The optimized retry layer handled: <b>429</b>, transient 5xx, request timeouts, token expiry. The logic respected: <span class="mono">Retry-After</span> headers, exponential windows, and <b>randomized jitter</b>.</p>
+<div class="note key">
+<span class="tag">💡 Why jitter?</span>
+Without jitter, after a throttling event the entire distributed fleet retries <u>simultaneously</u> → another burst! Randomized jitter significantly <b>stabilized</b> request behaviour across instances.
+</div>
+
+<h3>🗄️ Reducing Worker Overhead</h3>
+<p>Expensive ops inside active extraction workers were reduced. The optimized workers:</p>
+<ul>
+<li>Reused Graph &amp; S3 clients locally</li>
+<li>Reduced repeated setup work</li>
+<li>Minimized unnecessary metadata calls</li>
+<li><b>Removed</b> heavy DB logging from the active execution path</li>
+</ul>
+<div class="note tip">
+<span class="tag">✅ Benefit</span>
+Instead of frequent Postgres updates during extraction, DB interaction was greatly reduced → preventing: shared-row contention, DB session/run blocking, and high-concurrency worker delays.
+</div>
+
+<hr>
+<h2><span class="num">11</span> Final Results <span class="doodle">🚀 BAM!</span></h2>
+<p>After these architectural changes, scaling behaviour changed <b>dramatically</b>.</p>
+
+<table>
+<tr><th>Run / Scale</th><th>Before (earlier)</th><th>After (optimized)</th><th>Improvement</th></tr>
+<tr>
+  <td><b>40 GB</b><br><span class="small">(single instance)</span></td>
+  <td class="before">~3 hours<br><span class="small">unstable, long-tail</span></td>
+  <td class="after">~45 min<br><span class="small">stable &amp; consistent</span></td>
+  <td class="win">~93% faster</td>
+</tr>
+<tr>
+  <td><b>120 GB</b><br><span class="small">(15 instances)</span></td>
+  <td class="before">~5 hours</td>
+  <td class="after">~1 hour<br><span class="small">with only 3 instances!</span></td>
+  <td class="win">~80% faster</td>
+</tr>
+<tr>
+  <td><b>283–290 GB</b><br><span class="small">(15 instances)</span></td>
+  <td class="before">~15+ hours<br><span class="small">(estimated)</span></td>
+  <td class="after">~1 hour avg</td>
+  <td class="win">~90%+ faster</td>
+</tr>
+<tr>
+  <td><b>1 TB</b><br><span class="small">(projected, 25 inst)</span></td>
+  <td class="before">Several DAYS<br><span class="small">high bottlenecks</span></td>
+  <td class="after">~5–6 hours<br><span class="small">(projected)</span></td>
+  <td class="win">~88–90% faster</td>
+</tr>
+</table>
+
+<div class="grid2">
+<div class="note tip"><span class="tag">🏆 Success rate</span> Overall file success rate <b style="color:var(--green)">~99%</b> across all optimized runs.</div>
+<div class="note tip"><span class="tag">🛡️ Reliability</span> Highly stable &amp; reliable — <b style="color:var(--green)">predictable performance at scale.</b></div>
+</div>
+
+<hr>
+<h2><span class="num">12</span> Cost &amp; Time Optimization <span class="small">(283 GB run)</span></h2>
+
+<div class="grid2">
+<div class="note">
+<span class="tag b">⏱️ Time</span>
+<ul>
+<li>Earlier projection: <span class="before">~16.39 hours</span></li>
+<li>Optimized: <span class="after">~1.17 hours</span></li>
+<li><b>~15.22 hrs</b> wall-clock saved</li>
+<li><span class="win">~92.88% time optimization</span></li>
+</ul>
+<p class="small">Processes <b>2.83×</b> more data in &lt; quarter of earlier time.</p>
+</div>
+<div class="note">
+<span class="tag b">💰 Cost</span>
+<ul>
+<li>Earlier: <span class="before">~245.79 instance-hrs (~$2,481.88)</span></li>
+<li>Optimized: <span class="after">~17.50 instance-hrs (~$179.94)</span></li>
+<li><b>~228+</b> instance-hours saved</li>
+<li><span class="win">~92.75% cost optimization</span></li>
+</ul>
+<p class="small">💵 <b>~$2,300+</b> infra savings on a single large run!</p>
+</div>
+</div>
+
+<div class="center"><span class="arrowlbl" style="font-size:34px">Overall ~92% improvement (time + cost) 🎉</span></div>
+
+<div class="note key">
+<span class="tag">⚡ Projected at scale</span>
+A ~1 TB workload that previously took <b>multi-day</b> + extremely high cost is now projected at: <b style="color:var(--green)">~5–6 hours</b> with <b>~90%+ cost savings</b>, ~25 distributed instances.
+</div>
+
+<div class="sticky">
+<b>🔑 Key Takeaway:</b> The optimized pipeline transformed execution from <span style="background:#ffd0a0">"experimentally scalable" → "operationally scalable"</span>. The real win: scaling reliably within API limits, retries, concurrency &amp; orchestration constraints.
+</div>
+
+<hr>
+<h2><span class="num">13</span> Engineering Lessons — Top 10 <span class="doodle">(remember these!)</span></h2>
+
+<div class="note tip"><span class="tag">1️⃣</span> <b>More workers help — if orchestrated well.</b> Throughput improves only when workers coordinate efficiently, with minimal overhead &amp; contention.</div>
+<div class="note tip"><span class="tag">2️⃣</span> <b>Distributed bottlenecks often appear only at scale.</b> Systems that look fine in small tests can degrade badly as data volume + concurrency grow.</div>
+<div class="note tip"><span class="tag">3️⃣</span> <b>Balance parallelism &amp; threading with care.</b> Nested concurrency (workers × OCR threads) must be balanced — else contention, resource exhaustion, diminishing returns.</div>
+<div class="note tip"><span class="tag">4️⃣</span> <b>Upstream services are bounded, shared resources.</b> Respect limits, quotas, capacity. Efficient usage + backoff strategies prevent throttling/failures.</div>
+<div class="note tip"><span class="tag">5️⃣</span> <b>Retry systems without jitter create "retry storms".</b> Uncoordinated retries amplify load and delay recovery. Use: jitter, exponential backoff, circuit breakers.</div>
+<div class="note tip"><span class="tag">6️⃣</span> <b>Small per-unit overhead becomes massive at scale.</b> Milliseconds per operation → hours/days of wasted compute when repeated thousands of times.</div>
+<div class="note tip"><span class="tag">7️⃣</span> <b>Machine saturation &amp; workload density heavily affect throughput efficiency.</b> Sustained execution > bursty distributed scaling (better utilization, less orchestration overhead).</div>
+<div class="note tip"><span class="tag">8️⃣</span> <b>Profile EVERYTHING, not just CPU.</b> Usage, waits, latency, I/O, network, locks, garbage collection, external dependencies — identify end-to-end.</div>
+<div class="note tip"><span class="tag">9️⃣</span> <b>Unoptimized DB/IO create exponential impact.</b> Chatty, unindexed, or frequent operations on the same shared resource → bottlenecks, blocks, cascading delays.</div>
+<div class="note tip"><span class="tag">🔟</span> <b>Stable scaling is a system-wide discipline.</b> Coordinated control over orchestration, retries, concurrency, resource usage &amp; execution paths = predictable performance at any scale.</div>
+
+<div class="sticky pink center">
+<b style="font-size:20px">🧠 The Biggest Realisation:</b><br>
+Large-scale distributed pipelines are usually limited not by <u>raw compute</u>, but by <b>orchestration efficiency and contention amplification</b>.
+</div>
+
+<hr>
+<h2><span class="num">14</span> Wrapping Up</h2>
+<p>This was genuinely a difficult engineering problem. &#9888;&#65039;</p>
+<ul>
+<li>&#11088; Many assumptions failed.</li>
+<li>&#11088; Several experiments <u>regressed</u> performance instead of improving it.</li>
+<li>&#11088; Some bottlenecks only appeared after fixing earlier ones.</li>
+<li>&#11088; And many findings initially looked contradictory.</li>
+</ul>
+<p>But that's exactly what made the journey <b>valuable</b>. Beyond runtime + cost improvements, the most valuable outcome was: <span class="hl-p">a deeper understanding of how large-scale distributed systems actually behave under pressure.</span></p>
+
+<div class="note key">
+<span class="tag">✅ Who are these learnings for?</span>
+<ul>
+<li>People building OCR pipelines</li>
+<li>Distributed processing workloads</li>
+<li>Large-scale AI extraction platforms</li>
+</ul>
+So they can avoid the same pitfalls, and think about scale from a <b>systems perspective</b>, not just a <b>compute perspective</b>.
+</div>
+
+<div class="sticky blue center">
+<b style="font-size:22px;color:#15406b">"Scale isn't a compute problem — it's a systems-design discipline."</b>
+</div>
+
+<p class="center small" style="margin-top:30px">— End of Notes • Scaling OCR Pipelines to TB-Scale (English) —</p>
+
+
+
+
+
+
+
+
+</div>
+</body>
+</html>
